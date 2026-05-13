@@ -11,9 +11,8 @@ app.use(express.json());
 
 // ─── Product Map: WooCommerce ID → Shopify Variant ID ────────────────────────
 const PRODUCT_MAP = {
-  6191: "53755196703057",
-  5786: "53755775385937",
   6480: "53755808219473",
+  6482: "53755775385937",
 };
 
 const SHOPIFY_STORE = "https://qesbbu-2v.myshopify.com";
