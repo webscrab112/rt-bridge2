@@ -1,24 +1,15 @@
 "use strict";
 
 const express = require("express");
-const cors    = require("cors");
-const app     = express();
+const cors = require("cors");
 
-app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "10kb" }));
+const app = express();
 
-/* ══════════════════════════════════════════════════════
-   PRODUCT MAP
-   WooCommerce parent product ID → Shopify variant ID
+// ─── Middleware ───────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json());
 
-   HOW TO ADD A NEW PRODUCT:
-   1. WooCommerce admin → Products → hover product name
-      → bottom of browser shows: post=XXXX  ← that's the ID
-   2. Shopify admin → Products → click product → click variant
-      → URL shows: /variants/XXXXXXXXXXX  ← that's the variant ID
-   3. Add one line below:
-      XXXXX: "XXXXXXXXXXXXX",
-══════════════════════════════════════════════════════ */
+// ─── Product Map: WooCommerce ID → Shopify Variant ID ────────────────────────
 const PRODUCT_MAP = {
   6191: "53755196703057",
   5786: "53755775385937",
@@ -27,78 +18,74 @@ const PRODUCT_MAP = {
 
 const SHOPIFY_STORE = "https://qesbbu-2v.myshopify.com";
 
-/* ── Health check ── */
-app.get("/", (_req, res) => {
+// ─── Health Check (Railway uses this to confirm app is alive) ─────────────────
+app.get("/", (req, res) => {
   res.status(200).json({ status: "ok", message: "Cart bridge is running" });
 });
 
-/* ══════════════════════════════════════════════════════
-   POST /convert-cart
-   Receives: { cart: [ { id: 6191, qty: 2 } ] }
-   Returns:  { url: "https://shopify.../cart/VARIANT:QTY,..." }
-══════════════════════════════════════════════════════ */
+// ─── Main Endpoint: POST /convert-cart ───────────────────────────────────────
+//
+// Expected request body:
+//   { "cart": [ { "id": 6191, "qty": 2 }, { "id": 5786, "qty": 1 } ] }
+//
+// Returns:
+//   { "url": "https://qesbbu-2v.myshopify.com/cart/53755196703057:2,53755775385937:1" }
+//
 app.post("/convert-cart", (req, res) => {
   try {
-    console.log("INCOMING:", JSON.stringify(req.body));
-
-    const { cart } = req.body || {};
+    const cart = req.body?.cart;
 
     if (!Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({
-        error: "cart must be a non-empty array",
-        example: { cart: [{ id: 6191, qty: 2 }] }
-      });
+      return res.status(400).json({ error: "cart must be a non-empty array" });
     }
 
-    const parts   = [];
+    const parts = [];
     const skipped = [];
 
     for (const item of cart) {
-      const id  = Number(item.id);
-      const qty = Math.floor(Number(item.qty));
+      const wooId = Number(item.id);
+      const qty   = Number(item.qty);
 
-      if (!id || id <= 0)  { skipped.push({ ...item, reason: "invalid id"  }); continue; }
-      if (!qty || qty < 1) { skipped.push({ ...item, reason: "invalid qty" }); continue; }
-
-      const variantId = PRODUCT_MAP[id];
-
-      console.log(`id=${id} qty=${qty} → ${variantId || "NOT IN MAP"}`);
-
-      if (!variantId) {
-        skipped.push({
-          id, qty,
-          reason: `ID ${id} not in PRODUCT_MAP — add it to index.js`
-        });
+      if (!wooId || !qty || qty < 1) {
+        skipped.push(item);
         continue;
       }
 
-      parts.push(`${variantId}:${qty}`);
+      const shopifyVariantId = PRODUCT_MAP[wooId];
+      if (!shopifyVariantId) {
+        skipped.push({ ...item, reason: "no mapping found" });
+        continue;
+      }
+
+      parts.push(`${shopifyVariantId}:${qty}`);
     }
 
     if (parts.length === 0) {
       return res.status(400).json({
-        error: "No products matched. IDs not in PRODUCT_MAP.",
-        received_ids: cart.map(i => i.id),
-        map_has: Object.keys(PRODUCT_MAP),
-        skipped
+        error: "No recognisable products in cart",
+        skipped,
       });
     }
 
     const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}`;
-    console.log("✅ URL:", url);
-
     return res.status(200).json({ url, skipped });
 
   } catch (err) {
-    console.error("Error:", err);
+    console.error("convert-cart error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.use((_req, res) => res.status(404).json({ error: "Not found" }));
+// ─── 404 catch-all ───────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
 
+// ─── Start Server ─────────────────────────────────────────────────────────────
+// Railway injects process.env.PORT automatically.
+// Binding to 0.0.0.0 is REQUIRED — without it Railway cannot route traffic.
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Cart bridge on port ${PORT}`);
-  console.log("Map:", Object.keys(PRODUCT_MAP).join(", "));
+  console.log(`✅ Server running on port ${PORT}`);
 });
