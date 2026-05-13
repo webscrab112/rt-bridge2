@@ -1,0 +1,12 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Do NOT put "npm install" here — Railway's build phase handles that.
+# Putting it in startCommand causes a second install on every container start,
+# which can time out and trigger "Application failed to respond".
+startCommand = "node index.js"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
