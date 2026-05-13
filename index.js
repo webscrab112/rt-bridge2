@@ -66,7 +66,7 @@ app.post("/convert-cart", (req, res) => {
       });
     }
 
-    const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}`;
+    const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}?utm_source=instagram&utm_medium=social&utm_campaign=feed`;
     return res.status(200).json({ url, skipped });
 
   } catch (err) {
