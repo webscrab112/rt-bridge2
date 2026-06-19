@@ -1,90 +1,139 @@
 "use strict";
 
 const express = require("express");
-const cors = require("cors");
+const cors    = require("cors");
+const app     = express();
 
-const app = express();
+app.use(cors({ origin: "*" }));
+app.use(express.json({ limit: "10kb" }));
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
+/* ══════════════════════════════════════════════════════════════
+   PRODUCT MAP
+   WooCommerce product ID → Shopify variant ID
+   Multiple WooCommerce IDs CAN share the same Shopify variant ID.
+   Quantities for same Shopify variant are automatically merged.
 
-// ─── Product Map: WooCommerce ID → Shopify Variant ID ────────────────────────
+   TO ADD A NEW PRODUCT:
+   WooCommerce ID: go to wp-admin → Products → hover name → post=XXXX in URL
+   Shopify variant ID: Shopify admin → Products → variant → /variants/XXXX in URL
+   Then add: WOOCOMMERCE_ID: "SHOPIFY_VARIANT_ID",
+══════════════════════════════════════════════════════════════ */
 const PRODUCT_MAP = {
-  6480: "53755808219473",
+  // Shopify variant 53755196703057
+  6419: "53755196703057",
+  6191: "53755196703057",
+  6140: "53755196703057",
+
+  // Shopify variant 53755775385937
+  5786: "53755775385937",
+  6697: "53755775385937",
   6482: "53755775385937",
+  6362: "53755775385937",
+
+  // Shopify variant 53835905565009
+  6308: "53835905565009",
+  6396: "53835905565009",
+
+  // Shopify variant 53755808219473
+  6480: "53755808219473",
+
+  // Shopify variant 53835877548369
+  6719: "53835877548369",
+  6500: "53835877548369",
+
+  // Shopify variant 53835896586577
+  6314: "53835896586577",
+  6347: "53835896586577",
+  6819: "53835896586577",
+
+  // Shopify variant 53835898093905
+  6766: "53835898093905",
+  7584: "53835898093905",
+
+  // Shopify variant 53835869782353
+  6227: "53835869782353",
+
+  // Shopify variant 53835903435089
+  6302: "53835903435089",
+
+  // Shopify variant 53835901927761
+  6849: "53835901927761",
+  6306: "53835901927761",
+  7534: "53835901927761",
 };
 
-const SHOPIFY_STORE = "https://qesbbu-2v.myshopify.com";
+const SHOPIFY_STORE = "https://returntovault.site";
 
-// ─── Health Check (Railway uses this to confirm app is alive) ─────────────────
-app.get("/", (req, res) => {
-  res.status(200).json({ status: "ok", message: "Cart bridge is running" });
+app.get("/", (_req, res) => {
+  res.status(200).json({ status: "ok", message: "Cart bridge running" });
 });
 
-// ─── Main Endpoint: POST /convert-cart ───────────────────────────────────────
-//
-// Expected request body:
-//   { "cart": [ { "id": 6191, "qty": 2 }, { "id": 5786, "qty": 1 } ] }
-//
-// Returns:
-//   { "url": "https://qesbbu-2v.myshopify.com/cart/53755196703057:2,53755775385937:1" }
-//
 app.post("/convert-cart", (req, res) => {
   try {
-    const cart = req.body?.cart;
+    console.log("INCOMING:", JSON.stringify(req.body));
+
+    const { cart } = req.body || {};
 
     if (!Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({ error: "cart must be a non-empty array" });
-    }
-
-    const parts = [];
-    const skipped = [];
-
-    for (const item of cart) {
-      const wooId = Number(item.id);
-      const qty   = Number(item.qty);
-
-      if (!wooId || !qty || qty < 1) {
-        skipped.push(item);
-        continue;
-      }
-
-      const shopifyVariantId = PRODUCT_MAP[wooId];
-      if (!shopifyVariantId) {
-        skipped.push({ ...item, reason: "no mapping found" });
-        continue;
-      }
-
-      parts.push(`${shopifyVariantId}:${qty}`);
-    }
-
-    if (parts.length === 0) {
       return res.status(400).json({
-        error: "No recognisable products in cart",
-        skipped,
+        error: "cart must be a non-empty array",
+        example: { cart: [{ id: 6191, qty: 2 }] }
       });
     }
 
-    const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}?utm_source=instagram&utm_medium=social&utm_campaign=feed`;
+    // Merge quantities per Shopify variant ID
+    // Handles: multiple WooCommerce products → same Shopify variant
+    const variantTotals = {};
+    const skipped       = [];
+
+    for (const item of cart) {
+      const id  = Number(item.id);
+      const qty = Math.floor(Number(item.qty));
+
+      if (!id  || id  <= 0) { skipped.push({ ...item, reason: "invalid id"  }); continue; }
+      if (!qty || qty <= 0) { skipped.push({ ...item, reason: "invalid qty" }); continue; }
+
+      const variantId = PRODUCT_MAP[id];
+      console.log(`id=${id} qty=${qty} → ${variantId || "NOT IN MAP"}`);
+
+      if (!variantId) {
+        skipped.push({ id, qty, reason: `WooCommerce ID ${id} not in PRODUCT_MAP` });
+        continue;
+      }
+
+      // KEY FIX: accumulate qty per Shopify variant
+      // So if WooCommerce IDs 6419 + 6191 both map to same Shopify variant,
+      // their quantities are added together correctly
+      variantTotals[variantId] = (variantTotals[variantId] || 0) + qty;
+    }
+
+    const parts = Object.keys(variantTotals)
+      .map(function (v) { return v + ":" + variantTotals[v]; });
+
+    if (parts.length === 0) {
+      return res.status(400).json({
+        error: "No products matched PRODUCT_MAP.",
+        received_ids: cart.map(i => i.id),
+        map_has: Object.keys(PRODUCT_MAP).map(Number),
+        skipped
+      });
+    }
+
+    const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}`;
+    console.log("✅ URL:", url);
+
     return res.status(200).json({ url, skipped });
 
   } catch (err) {
-    console.error("convert-cart error:", err);
+    console.error("Error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ─── 404 catch-all ───────────────────────────────────────────────────────────
-app.use((req, res) => {
-  res.status(404).json({ error: "Not found" });
-});
+app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
-// ─── Start Server ─────────────────────────────────────────────────────────────
-// Railway injects process.env.PORT automatically.
-// Binding to 0.0.0.0 is REQUIRED — without it Railway cannot route traffic.
-const PORT = process.env.PORT || 3000;
-
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Cart bridge on port ${PORT}`);
+  console.log(`Map: ${Object.keys(PRODUCT_MAP).length} WooCommerce IDs → Shopify`);
 });
