@@ -8,13 +8,14 @@ app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "10kb" }));
 
 /* ══════════════════════════════════════════════════════════════
-   PRODUCT MAP
+   PRODUCT MAP — SITE #2
    WooCommerce product ID → Shopify variant ID
-   Multiple WooCommerce IDs CAN share the same Shopify variant ID.
-   Quantities for same Shopify variant are automatically merged.
+
+   Multiple WooCommerce IDs can share the same Shopify variant ID.
+   Quantities for the same Shopify variant are merged automatically.
 
    TO ADD A NEW PRODUCT:
-   WooCommerce ID: go to wp-admin → Products → hover name → post=XXXX in URL
+   WooCommerce ID: wp-admin → Products → hover name → post=XXXX in URL
    Shopify variant ID: Shopify admin → Products → variant → /variants/XXXX in URL
    Then add: WOOCOMMERCE_ID: "SHOPIFY_VARIANT_ID",
 ══════════════════════════════════════════════════════════════ */
@@ -24,8 +25,8 @@ const PRODUCT_MAP = {
   5803: "54101092532561",
   5778: "54101092532561",
   5546: "54101092532561",
-  
-   // Shopify variant 54101247983953
+
+  // Shopify variant 54101247983953
   5782: "54101247983953",
   5792: "54101247983953",
   5795: "54101247983953",
@@ -42,13 +43,12 @@ const PRODUCT_MAP = {
 
   // Shopify variant 54101198963025
   5805: "54101198963025",
-
 };
 
 const SHOPIFY_STORE = "https://returntovault.site";
 
 app.get("/", (_req, res) => {
-  res.status(200).json({ status: "ok", message: "Cart bridge running" });
+  res.status(200).json({ status: "ok", message: "Cart bridge running (site #2)", products: Object.keys(PRODUCT_MAP).length });
 });
 
 app.post("/convert-cart", (req, res) => {
@@ -60,12 +60,11 @@ app.post("/convert-cart", (req, res) => {
     if (!Array.isArray(cart) || cart.length === 0) {
       return res.status(400).json({
         error: "cart must be a non-empty array",
-        example: { cart: [{ id: 6191, qty: 2 }] }
+        example: { cart: [{ id: 5807, qty: 2 }] }
       });
     }
 
     // Merge quantities per Shopify variant ID
-    // Handles: multiple WooCommerce products → same Shopify variant
     const variantTotals = {};
     const skipped       = [];
 
@@ -84,9 +83,6 @@ app.post("/convert-cart", (req, res) => {
         continue;
       }
 
-      // KEY FIX: accumulate qty per Shopify variant
-      // So if WooCommerce IDs 6419 + 6191 both map to same Shopify variant,
-      // their quantities are added together correctly
       variantTotals[variantId] = (variantTotals[variantId] || 0) + qty;
     }
 
@@ -102,7 +98,15 @@ app.post("/convert-cart", (req, res) => {
       });
     }
 
-    const url = `${SHOPIFY_STORE}/cart/${parts.join(",")}`;
+    /* ══════════════════════════════════════════════════════════════
+       Same known Shopify limitation as site #1: /cart/VARIANT:QTY
+       ADDS to whatever is already in the customer's Shopify cart,
+       it never replaces it. We clear first via /cart/clear, then
+       redirect into the add — this matches the approach already
+       proven on site #1's bridge.
+    ══════════════════════════════════════════════════════════════ */
+    const addPath = `/cart/${parts.join(",")}`;
+    const url = `${SHOPIFY_STORE}/cart/clear?return_to=${encodeURIComponent(addPath)}`;
     console.log("✅ URL:", url);
 
     return res.status(200).json({ url, skipped });
@@ -118,5 +122,5 @@ app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Cart bridge on port ${PORT}`);
-  console.log(`Map: ${Object.keys(PRODUCT_MAP).length} WooCommerce IDs → Shopify`);
+  console.log(`Map: ${Object.keys(PRODUCT_MAP).length} WooCommerce IDs → Shopify (site #2)`);
 });
