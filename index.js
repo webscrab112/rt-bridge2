@@ -45,7 +45,7 @@ const PRODUCT_MAP = {
   5805: "54101198963025",
 };
 
-const SHOPIFY_STORE = "https://returntovault.site";
+const SHOPIFY_STORE = "https://backtovault.shop";
 
 app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok", message: "Cart bridge running (site #2)", products: Object.keys(PRODUCT_MAP).length });
